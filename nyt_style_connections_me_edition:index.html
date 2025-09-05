@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connections</title>
+  <style>
+    :root{
+      --bg:#f7f7f5; --text:#111; --muted:#656565;
+      --tile:#dce6f0; --tile-border:#333; --tile-selected:#222; --accent:#111;
+      --tile-yellow:#f7da21; --tile-green:#8ed081; --tile-blue:#80b8ff; --tile-purple:#c8a2ff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; background:var(--bg); color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:24px;}
+    .app{width:min(900px, 100%);}
+    header{display:flex; align-items:center; justify-content:space-between; margin-bottom:20px}
+    h1{font-size:clamp(20px, 4vw, 32px); margin:0; letter-spacing:0.5px}
+    .meta{color:var(--muted); font-size:14px}
+    .grid{display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;}
+    .tile{user-select:none; cursor:pointer; text-align:center; padding:18px 6px; border:2px solid var(--tile-border); border-radius:10px; color:#111; font-weight:700; letter-spacing:0.2px; min-height:64px; display:flex; align-items:center; justify-content:center; transition: transform .06s ease, border-color .2s ease, box-shadow .2s ease; background:var(--tile);}
+    .tile:hover{transform:translateY(-1px); box-shadow:0 2px 8px rgba(0,0,0,.15);}
+    .tile.selected{ border-color: var(--tile-selected); box-shadow:0 0 0 3px rgba(0,0,0,.06) inset;}
+    .tile.locked{ cursor:default;}
+    .yellow{background:var(--tile-yellow)}
+    .green{background:var(--tile-green)}
+    .blue{background:var(--tile-blue)}
+    .purple{background:var(--tile-purple)}
+    .row{display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:10px}
+    .solved{ color:#111; border:none;}
+    .bar{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 0; flex-wrap:wrap }
+    .actions{display:flex; gap:8px; flex-wrap:wrap}
+    button{border:none; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; background:#1a1a1a; color:white;}
+    button.secondary{ background:#e7e7e7; color:#111;}
+    button.ghost{ background:transparent; color:#111; border:2px solid #ddd;}
+    button:disabled{ opacity:.5; cursor:not-allowed }
+    .pill{font-weight:700; padding:8px 12px; border-radius:999px; background:#eee}
+    .group-card{border-radius:12px; padding:10px; font-weight:800; color:#111; display:flex; align-items:center; gap:10px;}
+    .group-title{ font-size:14px; text-transform:uppercase; letter-spacing:.6px }
+    .overlay{ position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.65)}
+    .overlay.show{ display:grid }
+    .reveal{ background:white; border-radius:16px; padding:28px; width:min(720px, 92vw); display:grid; gap:18px; place-items:center; text-align:center; box-shadow: 0 10px 30px rgba(0,0,0,.25);}
+    .reveal h2{ font-size: clamp(28px, 6vw, 56px); margin:0 }
+    .reveal .sub{ font-size: clamp(18px, 3.5vw, 28px); color:var(--muted) }
+    footer{margin-top:22px; color:var(--muted); font-size:12px; text-align:center}
+    @media (max-width:480px){.tile{ padding:14px 6px; min-height:56px; font-size:14px }}
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Connections">
+    <header>
+      <h1>Connections</h1>
+      <div class="meta" id="mistakes">Mistakes left: 4</div>
+    </header>
+    <div id="solved"></div>
+    <div class="grid" id="grid" aria-live="polite"></div>
+    <div class="bar">
+      <div class="actions">
+        <button id="submit" aria-label="Submit selection">Submit</button>
+        <button id="deselect" class="secondary" aria-label="Deselect all">Deselect</button>
+        <button id="shuffle" class="ghost" aria-label="Shuffle tiles">Shuffle</button>
+        <button id="reset" class="ghost" aria-label="Reset game">Reset</button>
+      </div>
+      <div class="pill" id="status" aria-live="polite"></div>
+    </div>
+    <footer>Inspired by NYT Connections. Reveals <strong>ME</strong> and <strong>TX LASSOS</strong> when solved.</footer>
+  </div>
+  <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-label="Final reveal">
+    <div class="reveal">
+      <h2>ME</h2>
+      <div class="sub">TX LASSOS</div>
+      <div class="actions">
+        <button id="playAgain">Play Again</button>
+        <button id="copy">Share Result</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const DATA = [
+      { name: 'Comforts', color: 'yellow', words: ['Coffee','Sitcoms','Word Games','Baking'] },
+      { name: 'Movement', color: 'green', words: ['Running','Lifting','Exploring','Nature'] },
+      { name: 'Companionship', color: 'blue', words: ['Friends','Laughter','Dachshunds','Family'] },
+      { name: 'Passions', color: 'purple', words: ['Reading','Stories','Journalism','Curiosity'] }
+    ];
+
+    const mistakesEl = document.getElementById('mistakes');
+    const gridEl = document.getElementById('grid');
+    const solvedEl = document.getElementById('solved');
+    const statusEl = document.getElementById('status');
+    const overlay = document.getElementById('overlay');
+    const submitBtn = document.getElementById('submit');
+    const deselectBtn = document.getElementById('deselect');
+    const shuffleBtn = document.getElementById('shuffle');
+    const resetBtn = document.getElementById('reset');
+    const playAgainBtn = document.getElementById('playAgain');
+    const copyBtn = document.getElementById('copy');
+
+    let state;
+
+    function init(newShuffle=true){
+      const tiles=DATA.flatMap((grp,gi)=>grp.words.map(w=>({word:w,groupIndex:gi}))); 
+      if(newShuffle) shuffle(tiles);
+      state={mistakes:4,selected:new Set(),solvedGroups:[],tiles};
+      renderAll();
+      status('Select four words that share a connection.');
+    }
+
+    function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];} arr.sort(()=>Math.random()-.5);}
+
+    function renderAll(){
+      mistakesEl.textContent=`Mistakes left: ${state.mistakes}`;
+      renderSolved();
+      renderGrid();
+      updateButtons();
+    }
+
+    function renderSolved(){
+      solvedEl.innerHTML='';
+      state.solvedGroups.forEach(gi=>{
+        const group=DATA[gi];
+        const wrap=document.createElement('div');
+        wrap.className='group-card '+group.color;
+        wrap.innerHTML=`<div class="group-title">${group.name}</div>`;
+        const row=document.createElement('div');
+        row.className='row';
+        group.words.forEach(w=>{
+          const t=document.createElement('div');
+          t.className='tile locked solved '+group.color;
+          t.textContent=w;
+          row.appendChild(t);
+        });
+        wrap.appendChild(row);
+        solvedEl.appendChild(wrap);
+      });
+    }
+
+    function renderGrid(){
+      gridEl.innerHTML='';
+      state.tiles.forEach((t,idx)=>{
+        if(state.solvedGroups.includes(t.groupIndex)) return;
+        const div=document.createElement('button');
+        div.className='tile';
+        if(state.selected.has(idx)) div.classList.add('selected');
+        div.setAttribute('aria-pressed', state.selected.has(idx));
+        div.textContent=t.word;
+        div.addEventListener('click',()=>onTileClick(idx));
+        gridEl.appendChild(div);
+      });
+    }
+
+    function onTileClick(idx){
+      if(state.selected.has(idx)){
+        state.selected.delete(idx);
+      } else if(state.selected.size < 4){
+        state.selected.add(idx);
+      }
+      renderAll();
+    }
+
+    function updateButtons(){
+      submitBtn.disabled = state.selected.size !== 4;
+      deselectBtn.disabled = state.selected.size === 0;
+    }
+
+    submitBtn.addEventListener('click', ()=>{
+      if(state.selected.size !== 4) return;
+      const selectedIndices = Array.from(state.selected);
+      const groupIndices = new Set(selectedIndices.map(i => state.tiles[i].groupIndex));
+      if(groupIndices.size === 1){
+        const groupIndex = selectedIndices.map(i => state.tiles[i].groupIndex)[0];
+        state.solvedGroups.push(groupIndex);
+        // Reveal colors on solved tiles
+        state.tiles.forEach((t, idx) => {
+          if(t.groupIndex === groupIndex){
+            const btns = Array.from(gridEl.children);
+            btns[idx] && btns[idx].classList.add(DATA[groupIndex].color);
+          }
+        });
+        state.selected.clear();
+        renderAll();
+        if(state.solvedGroups.length === DATA.length){
+          overlay.classList.add('show');
+        }
+      } else {
+        state.mistakes--;
+        state.selected.clear();
+        renderAll();
+        if(state.mistakes <= 0){
+          status('Game over! Reset to try again.');
+        }
+      }
+    });
+
+    deselectBtn.addEventListener('click', ()=>{ state.selected.clear(); renderAll(); });
+    shuffleBtn.addEventListener('click', ()=>{ shuffle(state.tiles); renderAll(); });
+    resetBtn.addEventListener('click', ()=>{ init(true); });
+    playAgainBtn.addEventListener('click', ()=>{ overlay.classList.remove('show'); init(true); });
+    copyBtn.addEventListener('click', ()=>{ /* Copy logic placeholder */ });
+
+    init(true);
+  </script>
+</body>
+</html>
